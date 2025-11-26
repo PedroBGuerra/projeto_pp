@@ -1,6 +1,7 @@
 package com.mycompany.crudswing.dao;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -15,6 +16,28 @@ public class PrecoDAO {
 
     public PrecoDAO() throws SQLException {
         connection = DatabaseConnection.getConnection();
+        ensurePrecoTableExists();
+    }
+
+    private void ensurePrecoTableExists() {
+        try {
+            DatabaseMetaData meta = connection.getMetaData();
+            String catalog = connection.getCatalog();
+            try (ResultSet rs = meta.getTables(catalog, null, "precos", null)) {
+                if (!rs.next()) {
+                    // table doesn't exist, create and insert defaults
+                    try (Statement st = connection.createStatement()) {
+                        st.executeUpdate("CREATE TABLE IF NOT EXISTS precos (id INT AUTO_INCREMENT PRIMARY KEY, max_hours INT NULL, base_price DOUBLE NOT NULL, extra_per_hour DOUBLE NULL)");
+                        st.executeUpdate("INSERT INTO precos (max_hours, base_price, extra_per_hour) VALUES (1, 15, NULL)");
+                        st.executeUpdate("INSERT INTO precos (max_hours, base_price, extra_per_hour) VALUES (2, 25, NULL)");
+                        st.executeUpdate("INSERT INTO precos (max_hours, base_price, extra_per_hour) VALUES (NULL, 30, 5)");
+                    }
+                }
+            }
+        } catch (SQLException ex) {
+            // If something fails, print stack and continue; getAllPrecos will return empty list.
+            System.err.println("Warning: could not ensure precos table exists: " + ex.getMessage());
+        }
     }
 
     // Load all pricing rules ordered by maxHours asc (nulls last)

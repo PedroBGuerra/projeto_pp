@@ -304,10 +304,17 @@ public class EstacionamentoGUI extends JFrame {
         String str = s.trim();
 
         DateTimeFormatter[] formatters = new DateTimeFormatter[] {
+            // Full date/time with 2-digit hour/min
             DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"),
             DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss"),
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"),
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
+            // Allow single-digit hour formats (e.g., 26/11/2025 2)
+            DateTimeFormatter.ofPattern("d/M/yyyy H"),
+            DateTimeFormatter.ofPattern("d/M/yyyy H:mm"),
+            DateTimeFormatter.ofPattern("dd/MM/yyyy H"),
+            DateTimeFormatter.ofPattern("dd/MM/yyyy H:mm"),
+            // Date-only and time-only
             DateTimeFormatter.ofPattern("dd/MM/yyyy"),
             DateTimeFormatter.ofPattern("HH:mm"),
             DateTimeFormatter.ofPattern("HH:mm:ss")
