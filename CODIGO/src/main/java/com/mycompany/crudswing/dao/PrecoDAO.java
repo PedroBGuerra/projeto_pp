@@ -44,8 +44,8 @@ public class PrecoDAO {
     public List<Preco> getAllPrecos() {
         List<Preco> list = new ArrayList<>();
         String sql = "SELECT id, max_hours, base_price, extra_per_hour FROM precos ORDER BY CASE WHEN max_hours IS NULL THEN 1 ELSE 0 END, max_hours";
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
+           try (Statement stmt = connection.createStatement();
+               ResultSet rs = stmt.executeQuery(sql)) {
             while (rs.next()) {
                 Integer max = rs.getObject("max_hours") == null ? null : rs.getInt("max_hours");
                 Double extra = rs.getObject("extra_per_hour") == null ? null : rs.getDouble("extra_per_hour");
@@ -53,7 +53,7 @@ public class PrecoDAO {
                 list.add(p);
             }
         } catch (SQLException ex) {
-            ex.printStackTrace();
+            System.err.println("Erro ao ler tabela de preços: " + ex.getMessage());
         }
         return list;
     }
@@ -71,7 +71,8 @@ public class PrecoDAO {
                 prevMax = max;
             } else {
                 // catch-all rule
-                double extra = r.getExtraPerHour() == null ? 0.0 : r.getExtraPerHour();
+                Double extraObj = r.getExtraPerHour();
+                double extra = extraObj == null ? 0.0 : extraObj;
                 double extraHours = Math.ceil(Math.max(0, hours - prevMax));
                 return r.getBasePrice() + extra * extraHours;
             }
@@ -79,7 +80,8 @@ public class PrecoDAO {
         // default fallback: last rule
         Preco last = rules.get(rules.size() - 1);
         if (last.getMaxHours() == null) {
-            double extra = last.getExtraPerHour() == null ? 0.0 : last.getExtraPerHour();
+            Double extraObj = last.getExtraPerHour();
+            double extra = extraObj == null ? 0.0 : extraObj;
             double extraHours = Math.ceil(Math.max(0, hours - prevMax));
             return last.getBasePrice() + extra * extraHours;
         }

@@ -13,11 +13,14 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import com.mycompany.crudswing.DatabaseConnection;
 import com.mycompany.crudswing.Estacionamento;
 
 public class EstacionamentoDAO {
+    private static final Logger LOGGER = Logger.getLogger(EstacionamentoDAO.class.getName());
     private Connection connection;
     // Flags to know whether each column is DATETIME or VARCHAR
     private boolean entradaIsDatetime = false;
@@ -30,7 +33,7 @@ public class EstacionamentoDAO {
             connection = DatabaseConnection.getConnection();
             detectColumnTypes();
         } catch (SQLException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.SEVERE, "Erro ao conectar ao banco de dados", e);
         }
     }
 
@@ -52,8 +55,7 @@ public class EstacionamentoDAO {
                 }
             }
         } catch (SQLException ex) {
-            // If metadata fails, leave defaults; the DAO will still attempt safe parsing.
-            ex.printStackTrace();
+            LOGGER.log(Level.SEVERE, "Erro ao detectar tipos de coluna", ex);
         }
     }
 
@@ -69,7 +71,7 @@ public class EstacionamentoDAO {
             setColumnFromString(stmt, 5, estacionamento.getSaida(), saidaIsDatetime, saidaMaxLen);
             stmt.executeUpdate();
         } catch (SQLException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.SEVERE, "Erro ao adicionar veículo", e);
         }
     }
 
@@ -80,34 +82,17 @@ public class EstacionamentoDAO {
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(sql)) {
             while (rs.next()) {
-                // Read columns depending on type
-                DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
-                String entradaStr = "";
-                String saidaStr = "";
-                if (entradaIsDatetime) {
-                    Timestamp tsEntrada = rs.getTimestamp("entrada");
-                    entradaStr = (tsEntrada != null) ? tsEntrada.toLocalDateTime().format(fmt) : "";
-                } else {
-                    entradaStr = (rs.getString("entrada") != null) ? rs.getString("entrada") : "";
-                }
-                if (saidaIsDatetime) {
-                    Timestamp tsSaida = rs.getTimestamp("saida");
-                    saidaStr = (tsSaida != null) ? tsSaida.toLocalDateTime().format(fmt) : "";
-                } else {
-                    saidaStr = (rs.getString("saida") != null) ? rs.getString("saida") : "";
-                }
-                Estacionamento estacionamento = new Estacionamento(
+                veiculos.add(new Estacionamento(
                     rs.getInt("id"),
                     rs.getString("marca"),
                     rs.getString("modelo"),
                     rs.getString("placa"),
-                    entradaStr,
-                    saidaStr
-                );
-                veiculos.add(estacionamento);
+                    rs.getString("entrada"),
+                    rs.getString("saida")
+                ));
             }
         } catch (SQLException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.SEVERE, "Erro ao buscar veículos", e);
         }
         return veiculos;
     }
@@ -124,33 +109,18 @@ public class EstacionamentoDAO {
             stmt.setInt(1, id);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
-                    String entradaStr = "";
-                    String saidaStr = "";
-                    if (entradaIsDatetime) {
-                        Timestamp tsEntrada = rs.getTimestamp("entrada");
-                        entradaStr = (tsEntrada != null) ? tsEntrada.toLocalDateTime().format(fmt) : "";
-                    } else {
-                        entradaStr = (rs.getString("entrada") != null) ? rs.getString("entrada") : "";
-                    }
-                    if (saidaIsDatetime) {
-                        Timestamp tsSaida = rs.getTimestamp("saida");
-                        saidaStr = (tsSaida != null) ? tsSaida.toLocalDateTime().format(fmt) : "";
-                    } else {
-                        saidaStr = (rs.getString("saida") != null) ? rs.getString("saida") : "";
-                    }
                     return new Estacionamento(
                             rs.getInt("id"),
                             rs.getString("marca"),
                             rs.getString("modelo"),
                             rs.getString("placa"),
-                            entradaStr,
-                            saidaStr
+                            rs.getString("entrada"),
+                            rs.getString("saida")
                     );
                 }
             }
         } catch (SQLException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.SEVERE, "Erro ao buscar veículo por ID", e);
         }
         return null;
     }
@@ -167,7 +137,7 @@ public class EstacionamentoDAO {
             stmt.setInt(6, estacionamento.getId());
             stmt.executeUpdate();
         } catch (SQLException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.SEVERE, "Erro ao atualizar veículo", e);
         }
     }
 
@@ -181,15 +151,22 @@ public class EstacionamentoDAO {
         if (isDatetime) {
             DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
             try {
+                // Tentar interpretar como LocalDateTime com o formato esperado
                 LocalDateTime dt = LocalDateTime.parse(dateStr, fmt);
                 stmt.setTimestamp(parameterIndex, Timestamp.valueOf(dt));
             } catch (DateTimeParseException e) {
-                try {
-                    LocalDateTime dt = LocalDateTime.parse(dateStr);
-                    stmt.setTimestamp(parameterIndex, Timestamp.valueOf(dt));
-                } catch (DateTimeParseException e2) {
-                    stmt.setNull(parameterIndex, Types.TIMESTAMP);
+                // Tentar corrigir horas ambíguas (e.g., "dd/MM/yyyy 2")
+                if (dateStr.matches("\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}")) {
+                    try {
+                        String correctedDateStr = dateStr + ":00"; // Adicionar minutos padrão
+                        LocalDateTime dt = LocalDateTime.parse(correctedDateStr, fmt);
+                        stmt.setTimestamp(parameterIndex, Timestamp.valueOf(dt));
+                        return;
+                    } catch (DateTimeParseException ignored) {
+                    }
                 }
+                // Se falhar, definir como NULL
+                stmt.setNull(parameterIndex, Types.TIMESTAMP);
             }
         } else {
             String toStore = dateStr;
@@ -207,12 +184,22 @@ public class EstacionamentoDAO {
             stmt.setInt(1, id);
             stmt.executeUpdate();
         } catch (SQLException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.SEVERE, "Erro ao deletar veículo", e);
+        }
+    }
+
+    // Deleta todos os veículos
+    public void deleteAllVeiculos() {
+        String sql = "DELETE FROM estacionamento";
+        try (Statement stmt = connection.createStatement()) {
+            stmt.executeUpdate(sql);
+        } catch (SQLException e) {
+            LOGGER.log(Level.SEVERE, "Erro ao apagar todos os registros", e);
         }
     }
 
     /*
      * Helper: setColumnFromString
-     * Converte uma string conforme coluna: se coluna for DATETIME, converte para Timestamp; se for VARCHAR, armazena como string truncada.
+     * Converte uma string conforme coluna: se coluna for DATETIME, converte para Timestam  p; se for VARCHAR, armazena como string truncada.
      */
 }

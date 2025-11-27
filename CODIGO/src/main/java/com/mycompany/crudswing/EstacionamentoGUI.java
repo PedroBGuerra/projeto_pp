@@ -124,6 +124,16 @@ public class EstacionamentoGUI extends JFrame {
         });
         panel.add(btnDelete);
 
+        JButton btnDeleteAll = new JButton("Apagar Todos");
+        btnDeleteAll.setBounds(340, 190, 150, 25);
+        btnDeleteAll.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                deleteAllVeiculos();
+            }
+        });
+        panel.add(btnDeleteAll);
+
         JLabel lblSearch = new JLabel("Pesquisar (placa/marca/modelo):");
         lblSearch.setBounds(350, 10, 200, 25);
         panel.add(lblSearch);
@@ -189,16 +199,21 @@ public class EstacionamentoGUI extends JFrame {
     }
 
     private void addVeiculo() {
-        // Add a new vehicle: Marca, Modelo, Placa come from input fields.
-        // Entrada is set automatically to the current date/time and saved in the DB as DATETIME.
+        // Adicionar um novo veículo: Marca, Modelo, Placa vêm dos campos de entrada.
         String marca = txtMarca.getText();
         String modelo = txtModelo.getText();
         String placa = txtPlaca.getText();
-        // entrada and saida not provided by user; entrada is set to now, saida is empty
 
+        // Configurar entrada para o horário atual no formato correto
+        LocalDateTime now = LocalDateTime.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+        String entradaNow = now.format(formatter);
 
-        // Set entrada to now and saida empty when creating a new record
-        String entradaNow = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"));
+        // Garantir que o formato está correto e não ambíguo
+        if (isAmbiguousHour(entradaNow)) {
+            entradaNow = convertAmbiguousToPm(entradaNow);
+        }
+
         Estacionamento veiculo = new Estacionamento(0, marca, modelo, placa, entradaNow, "");
         estacionamentoDAO.addVeiculo(veiculo);
         loadVeiculos();
@@ -238,6 +253,15 @@ public class EstacionamentoGUI extends JFrame {
             limparCampos();
         } else {
             JOptionPane.showMessageDialog(this, "Selecione um veículo para deletar.");
+        }
+    }
+
+    private void deleteAllVeiculos() {
+        int confirm = JOptionPane.showConfirmDialog(this, "Tem certeza que deseja apagar todos os registros?", "Confirmação", JOptionPane.YES_NO_OPTION);
+        if (confirm == JOptionPane.YES_OPTION) {
+            estacionamentoDAO.deleteAllVeiculos();
+            loadVeiculos();
+            JOptionPane.showMessageDialog(this, "Todos os registros foram apagados com sucesso.");
         }
     }
 
@@ -314,6 +338,11 @@ public class EstacionamentoGUI extends JFrame {
             DateTimeFormatter.ofPattern("d/M/yyyy H:mm"),
             DateTimeFormatter.ofPattern("dd/MM/yyyy H"),
             DateTimeFormatter.ofPattern("dd/MM/yyyy H:mm"),
+            // AM/PM patterns
+            DateTimeFormatter.ofPattern("dd/MM/yyyy h a"),
+            DateTimeFormatter.ofPattern("dd/MM/yyyy h:mm a"),
+            DateTimeFormatter.ofPattern("d/M/yyyy h a"),
+            DateTimeFormatter.ofPattern("d/M/yyyy h:mm a"),
             // Date-only and time-only
             DateTimeFormatter.ofPattern("dd/MM/yyyy"),
             DateTimeFormatter.ofPattern("HH:mm"),
@@ -343,6 +372,51 @@ public class EstacionamentoGUI extends JFrame {
         } catch (DateTimeParseException e) {
             throw new Exception("Formato de data/hora desconhecido: " + str);
         }
+    }
+
+    // Detect if the entrada string has a single-digit hour and no AM/PM marker (ambiguous)
+    private boolean isAmbiguousHour(String s) {
+        if (s == null || s.trim().isEmpty()) return false;
+        String str = s.trim();
+
+        // Regex para detectar formatos ambíguos como dd/MM/yyyy H ou dd/MM/yyyy H:mm sem AM/PM
+        String regex = "\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}(:\\d{2})?(?!\\s*[AaPp][Mm])$";
+        if (!str.matches(regex)) return false;
+
+        try {
+            String[] parts = str.split("\\s+");
+            if (parts.length >= 2) {
+                String timePart = parts[1];
+                String hourStr = timePart.split(":")[0];
+                int hour = Integer.parseInt(hourStr);
+                // Considerar ambíguo apenas se a hora estiver entre 1 e 11 (12 já é PM por padrão)
+                return hour >= 1 && hour <= 11;
+            }
+        } catch (NumberFormatException e) {
+            return false;
+        }
+        return false;
+    }
+
+    // Convert an ambiguous time without AM/PM to PM by adding 12 hours if needed
+    private String convertAmbiguousToPm(String s) {
+        if (s == null) return s;
+        String str = s.trim();
+        String[] parts = str.split("\\s+");
+        if (parts.length < 2) return s;
+        String datePart = parts[0];
+        String timePart = parts[1];
+        String[] timeParts = timePart.split(":");
+        int hour = Integer.parseInt(timeParts[0]);
+
+        // Verificar se o horário já está no formato correto (HH:mm)
+        if (timeParts.length > 1 && Integer.parseInt(timeParts[0]) >= 12) {
+            return s; // Já está correto, não precisa converter
+        }
+
+        if (hour < 12) hour += 12; // convert to PM
+        String newTime = hour + (timeParts.length > 1 ? (":" + timeParts[1]) : "");
+        return datePart + " " + newTime;
     }
 
     // Renderer for table button column
@@ -420,8 +494,63 @@ public class EstacionamentoGUI extends JFrame {
                 loadVeiculos();
 
                 try {
+                    // Detect ambiguous hour input (e.g., "26/11/2025 2" or "26/11/2025 2:13") without AM/PM
+                    String entradaRaw = atual.getEntrada();
+                    if (isAmbiguousHour(entradaRaw)) {
+                        int ambChoice = JOptionPane.showOptionDialog(EstacionamentoGUI.this,
+                                "Hora ambígua detectada na entrada: '" + entradaRaw + "'. Interpretar como 02:00 (AM) ou 14:00 (PM)?",
+                                "Hora ambígua", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE,
+                                null, new Object[]{"AM", "PM", "Cancelar"}, "PM");
+                        if (ambChoice == 2 || ambChoice == JOptionPane.CLOSED_OPTION) {
+                            // user cancelled
+                            fireEditingStopped();
+                            return;
+                        } else if (ambChoice == 1) { // PM
+                            entradaRaw = convertAmbiguousToPm(entradaRaw);
+                            // update the current object but do not commit yet; we'll use it for calculation
+                            atual = new Estacionamento(atual.getId(), atual.getMarca(), atual.getModelo(), atual.getPlaca(), entradaRaw, atual.getSaida());
+                        }
+                    }
                     LocalDateTime dtEntrada = parseToDateTime(atual.getEntrada());
                     long minutes = Duration.between(dtEntrada, saida).toMinutes();
+                    double hours = minutes / 60.0;
+                    // If duration seems very large (> 12 hours), confirm with user
+                    if (hours > 12.0) {
+                        int confirm = JOptionPane.showConfirmDialog(EstacionamentoGUI.this,
+                                String.format("O intervalo entre entrada (%s) e saída (%s) é de aproximadamente %.1f horas. Deseja continuar?",
+                                        atual.getEntrada(), saidaStr, hours),
+                                "Intervalo grande - confirmar", JOptionPane.YES_NO_OPTION);
+                        if (confirm != JOptionPane.YES_OPTION) {
+                            // Let user re-enter a corrected entrada before saving saida
+                            int edit = JOptionPane.showConfirmDialog(EstacionamentoGUI.this, "Deseja editar a entrada?", "Editar entrada", JOptionPane.YES_NO_OPTION);
+                            if (edit == JOptionPane.YES_OPTION) {
+                                // show spinner to edit entrada
+                                SpinnerDateModel em = new SpinnerDateModel(java.util.Date.from(dtEntrada.atZone(ZoneId.systemDefault()).toInstant()), null, null, java.util.Calendar.MINUTE);
+                                JSpinner espinner = new JSpinner(em);
+                                JSpinner.DateEditor eeditor = new JSpinner.DateEditor(espinner, "dd/MM/yyyy HH:mm");
+                                espinner.setEditor(eeditor);
+                                int opt = JOptionPane.showOptionDialog(EstacionamentoGUI.this, new Object[]{"Nova data/hora de entrada:", espinner}, "Editar Entrada", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE, null, null, null);
+                                if (opt == JOptionPane.OK_OPTION) {
+                                    java.util.Date newDate = (java.util.Date) espinner.getValue();
+                                    LocalDateTime newEntrada = LocalDateTime.ofInstant(newDate.toInstant(), ZoneId.systemDefault());
+                                    String newEntradaStr = newEntrada.format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"));
+                                    Estacionamento updatedEntrada = new Estacionamento(atual.getId(), atual.getMarca(), atual.getModelo(), atual.getPlaca(), newEntradaStr, atual.getSaida());
+                                    estacionamentoDAO.updateVeiculo(updatedEntrada);
+                                    // proceed with now-validated entrada
+                                    dtEntrada = newEntrada;
+                                    minutes = Duration.between(dtEntrada, saida).toMinutes();
+                                } else {
+                                    // user cancelled editing; abort registration
+                                    fireEditingStopped();
+                                    return;
+                                }
+                            } else {
+                                // user cancelled and doesn't want to edit; abort registration
+                                fireEditingStopped();
+                                return;
+                            }
+                        }
+                    }
                     double taxa;
                     if (precoDAO != null) {
                         double p = precoDAO.calculatePrice(minutes);
